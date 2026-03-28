@@ -174,7 +174,13 @@ void loop() {
   for (int i = 0; i < 2; i++) {
     handleButton(i);
   }
-  if (currentMode == "gamepad") gamepadSend();
+  if (currentMode == "gamepad") {
+    static uint32_t prevButtons = 0xFFFFFFFF; // force send on first loop
+    if (_gamepadReport.buttons != prevButtons) {
+      gamepadSend();
+      prevButtons = _gamepadReport.buttons;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
