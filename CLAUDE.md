@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
@@ -22,8 +22,10 @@ Each button supports tap-to-toggle and hold-for-push-to-talk. A mode switch sele
 |---------|--------|
 | `Keyboard` | Built-in (Arduino AVR core) |
 | `HID` | Built-in (Arduino AVR core) |
+| `EEPROM` | Built-in (Arduino AVR core) |
+| `WebUSB` | Arduino library manager — `arduino-cli lib install "WebUSB"` (auto-installed by `compile-upload.sh`) |
 
-No external libraries required. Gamepad HID output is implemented directly via the AVR core's `HID.h` (`HIDSubDescriptor` + `HID().SendReport()`), so no third-party joystick library is needed.
+Gamepad HID output is implemented directly via the AVR core's `HID.h` (`HIDSubDescriptor` + `HID().SendReport()`), so no third-party joystick library is needed.
 
 ## Commands
 
@@ -32,8 +34,10 @@ No external libraries required. Gamepad HID output is implemented directly via t
 | Compile | Arduino IDE → Sketch → Verify/Compile (`Ctrl+R`) |
 | Upload | Arduino IDE → Sketch → Upload (`Ctrl+U`) |
 | Serial monitor | Tools → Serial Monitor — 9600 baud (prints mode changes; unused at runtime otherwise) |
-| `arduino-cli` compile | `arduino-cli compile --fqbn arduino:avr:leonardo MicrophoneController` |
-| `arduino-cli` upload | `arduino-cli upload -p /dev/ttyACM0 --fqbn arduino:avr:leonardo MicrophoneController` |
+| Compile + upload (script) | `./compile-upload.sh` (compile only: `./compile-upload.sh compile`, upload only: `./compile-upload.sh upload`) |
+| `arduino-cli` compile only | `arduino-cli compile --fqbn arduino:avr:leonardo --build-path .build MicrophoneController` |
+
+The `compile-upload.sh` script is the preferred CLI workflow. It uses `arduino-cli` for compilation (with custom USB VID `0x1209`, PID `0x0001`, product name `"Microphone Controller"`, manufacturer `"Tebay.dev"`) and `dfu-programmer` for flashing (erase → flash → reset). The script auto-installs `dfu-programmer` via `apt` or `dnf` if missing. Build artifacts go to `.build/`.
 
 ## Hardware
 
@@ -83,8 +87,44 @@ All logic lives in a single sketch file: [MicrophoneController.ino](MicrophoneCo
 |----------|---------|---------|
 | `HOLD_MS` | `50` | Milliseconds held before a press is treated as a hold/PTT |
 | `DEBOUNCE_MS` | `10` | Debounce window in milliseconds |
-| `MIC_KEYS[2]` | `{ KEY_SCROLL_LOCK, KEY_PAUSE }` | Keyboard keys for each button |
+| `MIC_KEYS[2]` | `{ KEY_SCROLL_LOCK, KEY_PAUSE }` | Keyboard keys — loaded from EEPROM at startup; compile-time values are the fallback defaults |
+| `MIC_MODS[2]` | `{ 0, 0 }` | Modifier bitmask per button (bit0=Ctrl, bit1=Shift, bit2=Alt) — loaded from EEPROM |
 | `JOY_BTN[2]` | `{ 7, 8 }` | 0-indexed joystick button slots (OS reports as buttons 8 and 9) |
+| `COMBO_REQUIRED` | `3` | Simultaneous both-button presses needed to toggle config mode |
+| `COMBO_WINDOW_MS` | `1000` | Window in ms within which `COMBO_REQUIRED` presses must occur |
+
+### EEPROM layout
+
+| Address | Content |
+|---------|---------|
+| `0` | Magic byte `0xAB` — absent means EEPROM uninitialised; compile-time defaults are used |
+| `1` | `MIC_KEYS[0]` keycode |
+| `2` | `MIC_KEYS[1]` keycode |
+| `3` | `MIC_MODS[0]` modifier mask |
+| `4` | `MIC_MODS[1]` modifier mask |
+
+`EEPROM.update()` is used (skip-if-same) to minimise write cycles.
+
+### Config mode / WebUSB
+
+Config mode is toggled by pressing **both buttons simultaneously 3× within 1 second**. LEDs flash 3× on entry, 2× on exit. Simultaneous button presses never toggle latches (the gesture is reserved).
+
+The config page lives in `web/index.html`. Serve it locally:
+```
+cd web && python3 -m http.server 8080
+# then open http://localhost:8080 in Chrome
+```
+The WebUSB landing page URL in the firmware constructor must match (currently `localhost:8080`). For HTTPS hosting change `https_only` from `0` to `1` and update the URL.
+
+Chrome (not Firefox/Safari) is required for WebUSB. The page auto-discovers the vendor-specific USB interface (class `0xFF`) and its bulk endpoints — no hardcoded endpoint numbers.
+
+**Protocol** — raw bytes over the WebUSB bulk interface:
+
+| Direction | Bytes | Meaning |
+|-----------|-------|---------|
+| Device → host (on connect or `R`) | `'C' <key0> <mod0> <key1> <mod1>` | Current config (5 bytes) |
+| Host → device | `'K' <idx> <keycode> <modmask>` | Set button `idx` (0 or 1); saves to EEPROM; device replies `'A'` |
+| Host → device | `'R'` | Request config re-send (1 byte) |
 
 ### `Button` struct fields
 
@@ -101,12 +141,16 @@ All logic lives in a single sketch file: [MicrophoneController.ino](MicrophoneCo
 - `initVariant()` — registers the custom 32-button HID descriptor before USB enumeration (called by Arduino's main() after init(), before USBDevice.attach())
 - `gamepadSetButton(index, state)` — sets/clears a single bit in the 32-bit button state word
 - `gamepadSend()` — sends the current button state as a raw HID report (report ID 3)
-- `setSignal(idx, active)` — activates or deactivates HID output for one button (keyboard key or gamepad button depending on current mode)
+- `loadKeysFromEEPROM()` — reads keycodes and modifier masks from EEPROM; no-op if magic byte absent
+- `saveButtonToEEPROM(idx, key, mod)` — writes magic, keycode, and modifier mask using `update()` (skip-if-same)
+- `handleWebUSB()` — gated on `configMode`; tracks connection state, announces config on connect, dispatches `K`/`R` commands
+- `checkCombo()` — detects simultaneous both-button presses; sets `bothPressedActive`; toggles `configMode` + flashes LEDs on 3rd press within window
+- `setSignal(idx, active)` — presses/releases modifier keys then main key (keyboard mode) or sets joystick bit (gamepad mode)
 - `setMode()` — reads mode pin, switches mode if changed, releases all outputs and resets all button state on transition
 - `readMode()` — reads `MODE_PIN` and returns `"keyboard"` or `"gamepad"`
 - `handleButton(idx)` — debounce, press/hold/release detection, latch management, HID output, LED update for one button
 
 ## VS Code / IntelliSense
 
-The `#include` errors for `Keyboard.h` and `Joystick.h` are IntelliSense path issues only — the code compiles correctly from the Arduino IDE.
+The `#include` errors for `Keyboard.h` and `HID.h` are IntelliSense path issues only — the code compiles correctly from the Arduino IDE.
 To resolve squiggles: open the command palette and run **Arduino: Board Config**, select **Arduino Leonardo**, then run **Arduino: Rebuild IntelliSense Configuration**.

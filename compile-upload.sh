@@ -10,6 +10,7 @@ check_deps() {
         echo "arduino-cli not found. Install from https://arduino.github.io/arduino-cli/" >&2
         exit 1
     fi
+    arduino-cli lib install "WebUSB" 2>/dev/null || true
     if ! command -v dfu-programmer &>/dev/null; then
         echo "dfu-programmer not found. Installing..."
         if command -v apt &>/dev/null; then
