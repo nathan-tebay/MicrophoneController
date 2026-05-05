@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Microphone Controller Config</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 560px;
+      margin: 40px auto;
+      padding: 0 20px;
+      color: #1a1a1a;
+      background: #f5f5f5;
+    }
+    h1 { font-size: 1.3em; margin-bottom: 4px; }
+    .subtitle { color: #666; font-size: 0.85em; margin-bottom: 20px; }
+    .status {
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 0.88em;
+      margin-bottom: 16px;
+      line-height: 1.4;
+    }
+    .status.neutral     { background: #e9ecef; color: #495057; }
+    .status.connected   { background: #d1e7dd; color: #0a3622; }
+    .status.error       { background: #f8d7da; color: #58151c; }
+    .controls { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.88em;
+      font-weight: 500;
+      transition: opacity 0.15s;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn:hover:not(:disabled) { opacity: 0.85; }
+    .btn-primary   { background: #0d6efd; color: #fff; }
+    .btn-secondary { background: #6c757d; color: #fff; }
+    .btn-success   { background: #198754; color: #fff; }
+
+    .card {
+      background: #fff;
+      border: 1px solid #dee2e6;
+      border-radius: 8px;
+      padding: 18px 20px;
+      margin-bottom: 16px;
+    }
+    .card h2 { font-size: 1em; margin: 0 0 14px; }
+
+    .field { margin-bottom: 12px; }
+    .field label { display: block; font-size: 0.83em; font-weight: 600; color: #555; margin-bottom: 4px; }
+    .field select {
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid #ced4da;
+      border-radius: 5px;
+      font-size: 0.9em;
+      background: #fff;
+    }
+
+    .modifiers {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      padding: 8px 0;
+    }
+    .mod-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.9em;
+      cursor: pointer;
+      user-select: none;
+    }
+    .mod-label input[type=checkbox] { width: 15px; height: 15px; cursor: pointer; }
+
+    .preview {
+      font-size: 0.82em;
+      color: #666;
+      background: #f8f9fa;
+      border-radius: 4px;
+      padding: 5px 10px;
+      margin-bottom: 10px;
+      min-height: 26px;
+    }
+    .preview span { font-weight: 600; color: #333; }
+  </style>
+</head>
+<body>
+
+<h1>Microphone Controller Config</h1>
+<p class="subtitle">Updates keycodes stored on the device. Changes survive power cycles.</p>
+
+<div id="statusEl" class="status neutral">
+  Not connected. Enable config mode on the device (press both buttons simultaneously
+  3&times; within 1&nbsp;s — LEDs flash 3&times; to confirm), then click Connect.
+</div>
+
+<div class="controls">
+  <button class="btn btn-primary" id="connectBtn" onclick="toggleConnect()">Connect Device</button>
+  <button class="btn btn-secondary" id="refreshBtn" onclick="requestConfig()" disabled>Refresh Config</button>
+</div>
+
+<!-- Button 1 -->
+<div class="card">
+  <h2>Button 1</h2>
+  <div class="field">
+    <label for="key0">Key</label>
+    <select id="key0" onchange="updatePreview(0)"></select>
+  </div>
+  <div class="field">
+    <label>Modifiers</label>
+    <div class="modifiers">
+      <label class="mod-label"><input type="checkbox" id="ctrl0"  onchange="updatePreview(0)"> Ctrl</label>
+      <label class="mod-label"><input type="checkbox" id="shift0" onchange="updatePreview(0)"> Shift</label>
+      <label class="mod-label"><input type="checkbox" id="alt0"   onchange="updatePreview(0)"> Alt</label>
+    </div>
+  </div>
+  <div class="preview" id="preview0">—</div>
+  <button class="btn btn-success" id="save0" onclick="saveButton(0)" disabled>Save Button 1</button>
+</div>
+
+<!-- Button 2 -->
+<div class="card">
+  <h2>Button 2</h2>
+  <div class="field">
+    <label for="key1">Key</label>
+    <select id="key1" onchange="updatePreview(1)"></select>
+  </div>
+  <div class="field">
+    <label>Modifiers</label>
+    <div class="modifiers">
+      <label class="mod-label"><input type="checkbox" id="ctrl1"  onchange="updatePreview(1)"> Ctrl</label>
+      <label class="mod-label"><input type="checkbox" id="shift1" onchange="updatePreview(1)"> Shift</label>
+      <label class="mod-label"><input type="checkbox" id="alt1"   onchange="updatePreview(1)"> Alt</label>
+    </div>
+  </div>
+  <div class="preview" id="preview1">—</div>
+  <button class="btn btn-success" id="save1" onclick="saveButton(1)" disabled>Save Button 2</button>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Key definitions — codes match Arduino Keyboard.h values
+// ---------------------------------------------------------------------------
+const KEY_GROUPS = [
+  { label: 'Special', keys: [
+    { label: 'Scroll Lock', code: 0xCF },
+    { label: 'Pause / Break', code: 0xE1 },
+    { label: 'Caps Lock', code: 0xC1 },
+    { label: 'Print Screen', code: 0xCE },
+  ]},
+  { label: 'Function', keys: Array.from({ length: 12 }, (_, i) => ({
+      label: `F${i + 1}`, code: 0xC2 + i,
+    })),
+  },
+  { label: 'Navigation', keys: [
+    { label: 'Insert',    code: 0xD1 },
+    { label: 'Delete',    code: 0xD4 },
+    { label: 'Home',      code: 0xD2 },
+    { label: 'End',       code: 0xD5 },
+    { label: 'Page Up',   code: 0xD3 },
+    { label: 'Page Down', code: 0xD6 },
+    { label: '↑ Up',      code: 0xDA },
+    { label: '↓ Down',    code: 0xD9 },
+    { label: '← Left',    code: 0xD8 },
+    { label: '→ Right',   code: 0xD7 },
+  ]},
+  { label: 'Letters', keys: Array.from({ length: 26 }, (_, i) => ({
+      label: String.fromCharCode(65 + i), code: 97 + i,
+    })),
+  },
+  { label: 'Numbers', keys: Array.from({ length: 10 }, (_, i) => ({
+      label: String(i), code: 48 + i,
+    })),
+  },
+];
+
+// Build a flat code→label map for previews
+const KEY_LABELS = {};
+for (const g of KEY_GROUPS) {
+  for (const k of g.keys) KEY_LABELS[k.code] = k.label;
+}
+
+function buildSelects() {
+  for (let idx = 0; idx < 2; idx++) {
+    const sel = document.getElementById('key' + idx);
+    for (const group of KEY_GROUPS) {
+      const og = document.createElement('optgroup');
+      og.label = group.label;
+      for (const k of group.keys) {
+        const opt = document.createElement('option');
+        opt.value = k.code;
+        opt.textContent = k.label;
+        og.appendChild(opt);
+      }
+      sel.appendChild(og);
+    }
+    updatePreview(idx);
+  }
+}
+
+function updatePreview(idx) {
+  const sel  = document.getElementById('key' + idx);
+  const code = parseInt(sel.value);
+  const mods = [];
+  if (document.getElementById('ctrl'  + idx).checked) mods.push('Ctrl');
+  if (document.getElementById('shift' + idx).checked) mods.push('Shift');
+  if (document.getElementById('alt'   + idx).checked) mods.push('Alt');
+  const keyName = KEY_LABELS[code] || `0x${code.toString(16).toUpperCase().padStart(2, '0')}`;
+  const combo   = [...mods, keyName].join(' + ');
+  document.getElementById('preview' + idx).innerHTML = `<span>${combo}</span>`;
+}
+
+// ---------------------------------------------------------------------------
+// WebUSB
+// ---------------------------------------------------------------------------
+let device = null, epIn = null, epOut = null;
+
+function setStatus(msg, cls = 'neutral') {
+  const el = document.getElementById('statusEl');
+  el.textContent = msg;
+  el.className = 'status ' + cls;
+}
+
+function setConnected(on) {
+  document.getElementById('refreshBtn').disabled = !on;
+  document.getElementById('save0').disabled = !on;
+  document.getElementById('save1').disabled = !on;
+  document.getElementById('connectBtn').textContent = on ? 'Disconnect' : 'Connect Device';
+}
+
+async function toggleConnect() {
+  if (device) {
+    try { await device.close(); } catch (_) {}
+    device = null; epIn = null; epOut = null;
+    setConnected(false);
+    setStatus('Disconnected.');
+    return;
+  }
+
+  try {
+    device = await navigator.usb.requestDevice({
+      filters: [{ vendorId: 0x1209, productId: 0x0001 }],
+    });
+    await device.open();
+    await device.selectConfiguration(1);
+
+    // Find the vendor-specific interface added by the WebUSB library (class 0xFF)
+    const iface = device.configuration.interfaces.find(
+      i => i.alternates[0].interfaceClass === 0xFF
+    );
+    if (!iface) throw new Error(
+      'WebUSB interface not found — is config mode active on the device? ' +
+      '(press both buttons 3× within 1 s until the LEDs flash)'
+    );
+
+    await device.claimInterface(iface.interfaceNumber);
+    const alt = iface.alternates[0];
+    epIn  = alt.endpoints.find(e => e.direction === 'in');
+    epOut = alt.endpoints.find(e => e.direction === 'out');
+    if (!epIn || !epOut) throw new Error('Bulk endpoints not found.');
+
+    setConnected(true);
+    setStatus('Connected. Requesting config…', 'connected');
+    await requestConfig();
+  } catch (err) {
+    try { if (device) await device.close(); } catch (_) {}
+    device = null; epIn = null; epOut = null;
+    setConnected(false);
+    setStatus('Error: ' + err.message, 'error');
+  }
+}
+
+async function send(bytes) {
+  await device.transferOut(epOut.endpointNumber, new Uint8Array(bytes));
+}
+
+// transferIn doesn't support cancellation, so we race against a timeout.
+// The dangling transferIn will resolve or reject silently after the timeout.
+async function readWithTimeout(ms = 3000) {
+  const transfer = device.transferIn(epIn.endpointNumber, 64);
+  const timeout  = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Read timed out — is the device in config mode?')), ms)
+  );
+  const result = await Promise.race([transfer, timeout]);
+  return new Uint8Array(result.data.buffer);
+}
+
+async function requestConfig() {
+  try {
+    await send(['R'.charCodeAt(0)]);
+    const data = await readWithTimeout();
+    // Expected: 'C' <key0> <mod0> <key1> <mod1>
+    if (data[0] !== 0x43 || data.length < 5) {
+      setStatus('Unexpected response from device — check config mode.', 'error');
+      return;
+    }
+    applyConfig(data[1], data[2], data[3], data[4]);
+    setStatus('Config loaded.', 'connected');
+  } catch (err) {
+    setStatus('Error: ' + err.message, 'error');
+  }
+}
+
+function applyConfig(key0, mod0, key1, mod1) {
+  applyButton(0, key0, mod0);
+  applyButton(1, key1, mod1);
+}
+
+function applyButton(idx, keyCode, modMask) {
+  const sel = document.getElementById('key' + idx);
+
+  // Try to select the received code; if absent, inject an unknown entry
+  let found = Array.from(sel.options).some(o => parseInt(o.value) === keyCode);
+  if (!found) {
+    const opt = document.createElement('option');
+    opt.value = keyCode;
+    opt.textContent = `Unknown (0x${keyCode.toString(16).toUpperCase().padStart(2, '0')})`;
+    sel.appendChild(opt);
+  }
+  sel.value = keyCode;
+
+  document.getElementById('ctrl'  + idx).checked = !!(modMask & 0x01);
+  document.getElementById('shift' + idx).checked = !!(modMask & 0x02);
+  document.getElementById('alt'   + idx).checked = !!(modMask & 0x04);
+  updatePreview(idx);
+}
+
+async function saveButton(idx) {
+  const key = parseInt(document.getElementById('key' + idx).value);
+  let mod = 0;
+  if (document.getElementById('ctrl'  + idx).checked) mod |= 0x01;
+  if (document.getElementById('shift' + idx).checked) mod |= 0x02;
+  if (document.getElementById('alt'   + idx).checked) mod |= 0x04;
+
+  setStatus(`Saving button ${idx + 1}…`, 'neutral');
+  try {
+    await send(['K'.charCodeAt(0), idx, key, mod]);
+    const data = await readWithTimeout();
+    if (data[0] === 0x41 /* 'A' */) {
+      setStatus(`Button ${idx + 1} saved.`, 'connected');
+    } else {
+      setStatus('Unexpected acknowledgement from device.', 'error');
+    }
+  } catch (err) {
+    setStatus('Error: ' + err.message, 'error');
+  }
+}
+
+// ---------------------------------------------------------------------------
+buildSelects();
+</script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-SKETCH=/mnt/LargeNVMe/Projects/GitHub/MicrophoneController
+SKETCH=/mnt/LargeNVMe/Projects/GitHub/personal/MicrophoneController
 BUILD=$SKETCH/.build
 HEX=$BUILD/MicrophoneController.ino.hex
 
