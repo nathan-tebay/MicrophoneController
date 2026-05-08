@@ -7,14 +7,13 @@ A 2-button USB HID microphone controller built on the **nullbits Bit-C PRO (ATme
 - **Dual-mode HID output**: Switch between keyboard (Scroll Lock / Pause keys) and gamepad (buttons 8–9) modes
 - **Tap-to-toggle**: Press once to activate a microphone latch that persists until toggled off
 - **Push-to-talk (PTT)**: Hold a button to send a signal only while physically held; releases on button release
-- **Per-button configuration**: Remap keys and add modifiers (Ctrl, Shift, Alt) via WebUSB
-- **Non-volatile storage**: Configuration persists across power cycles (stored in EEPROM)
 - **LED indicators**: Each button has an LED that reflects its active state
-- **Web configuration UI**: Chrome-based configuration page with real-time keycode selection and preview
+- **Serial debug output**: Status messages at 9600 baud
 
-## Hardware Requirements
+## Hardware
 
 ### Board
+
 - **MCU**: ATmega32U4 (Arduino Leonardo-compatible)
 - **Board**: nullbits Bit-C PRO
 
@@ -28,276 +27,138 @@ A 2-button USB HID microphone controller built on the **nullbits Bit-C PRO (ATme
 | LED 2 | D5 | Connect through ~220 Ω resistor to GND |
 | Mode switch | D15 | LOW (to GND) = keyboard mode; HIGH/floating = gamepad mode |
 
-## Software Requirements
+## Software requirements
 
 ### Toolchain
-- **Arduino IDE**: Latest version (or `arduino-cli`)
+- **Arduino IDE** (latest) or `arduino-cli`
 - **Board package**: Arduino AVR (built-in)
-- **Upload protocol**: USB (native ATmega32U4 USB bootloader)
 
 ### Libraries
-| Library | Source | Installation |
-|---------|--------|--------------|
-| `Keyboard` | Built-in (Arduino AVR core) | — |
-| `HID` | Built-in (Arduino AVR core) | — |
-| `EEPROM` | Built-in (Arduino AVR core) | — |
-| `WebUSB` | Arduino library manager | `arduino-cli lib install "WebUSB"` |
 
-**Note**: Gamepad HID output is implemented directly via the AVR core's `HID.h` (`HIDSubDescriptor` + `HID().SendReport()`), so no third-party joystick library is needed.
+| Library | Source |
+|---------|--------|
+| `Keyboard` | Built-in (Arduino AVR core) |
+| `HID` | Built-in (Arduino AVR core) |
 
-## Build & Upload
+Gamepad output uses the AVR core's `HIDSubDescriptor` directly — no third-party joystick library needed.
 
-### Using the Build Script (Recommended)
+## Build & upload
 
-The `compile-upload.sh` script automates the entire process:
+### Using the build script (recommended)
 
 ```bash
-# Compile and upload (full cycle)
-./compile-upload.sh
-
-# Compile only
-./compile-upload.sh compile
-
-# Upload only
-./compile-upload.sh upload
+./compile-upload.sh          # Compile and upload
+./compile-upload.sh compile  # Compile only
+./compile-upload.sh upload   # Upload only
 ```
 
 The script:
-- Ensures `dfu-programmer` is installed (auto-installs via `apt` or `dnf` if missing)
-- Ensures the `WebUSB` library is available
+- Auto-installs `dfu-programmer` if missing (apt or dnf)
 - Compiles with custom USB identifiers (VID `0x1209`, PID `0x0001`)
 - Uses `dfu-programmer` for flashing: erase → flash → reset
 - Stores build artifacts in `.build/`
 
 ### Using Arduino IDE
 
-1. Open **MicrophoneController.ino** in the Arduino IDE
+1. Open **MicrophoneController.ino**
 2. Select **Tools → Board → Arduino AVR Boards → Arduino Leonardo**
-3. **Compile**: Sketch → Verify/Compile (`Ctrl+R`)
-4. **Upload**: Sketch → Upload (`Ctrl+U`)
+3. Compile: `Ctrl+R`
+4. Upload: `Ctrl+U`
 
-### Manual CLI Compilation
+## Button behavior
 
-```bash
-arduino-cli compile --fqbn arduino:avr:leonardo --build-path .build MicrophoneController
-```
-
-## Button Behavior
-
-### In Keyboard Mode (Mode pin LOW)
+### Keyboard mode (Mode pin LOW)
 
 | Action | Behavior |
 |--------|----------|
 | **Tap** | Toggle microphone latch state; LED tracks latch |
-| **Hold** (≥50 ms) | Push-to-talk: signal active only while held; signal and latch clear on release |
-| **Mode switch** | All keys released; latch states reset; mode indicator printed to serial |
+| **Hold** (≥50 ms) | Push-to-talk: signal active only while held; clears on release |
 
 **Default key assignments**:
 - Button 1: `Scroll Lock` (0xCF)
 - Button 2: `Pause / Break` (0xE1)
 
-These keys are chosen because they are vestigial in modern software and fully supported for PTT in Discord, TeamSpeak, and Mumble.
-
-### In Gamepad Mode (Mode pin HIGH)
+### Gamepad mode (Mode pin HIGH)
 
 | Action | Behavior |
 |--------|----------|
 | **Tap** | Toggle joystick button latch state; LED tracks latch |
 | **Hold** (≥50 ms) | Push-to-talk: joystick button active only while held; clears on release |
-| **Mode switch** | All joystick buttons released; latch states reset; mode indicator printed to serial |
 
 **Button assignments**:
-- Button 1: Joystick button 8 (OS reports as button 8, 0-indexed slot 7)
-- Button 2: Joystick button 9 (OS reports as button 9, 0-indexed slot 8)
+- Button 1: Joystick button 8
+- Button 2: Joystick button 9
 
-These button slots are safely beyond the standard controller layout (4–6 face buttons on most controllers, max 14 on PS5 DualSense) and avoid shadowing gameplay bindings.
+## Remapping keys
 
-## Configuration & WebUSB
+Keys are hardcoded compile-time constants. Edit `MicrophoneController.ino`:
 
-### Entering Configuration Mode
+```cpp
+uint8_t MIC_KEYS[2] = { KEY_SCROLL_LOCK, KEY_PAUSE };
+```
 
-Press **both buttons simultaneously 3 times within 1 second**. The LEDs will flash 3 times to confirm entry. While in config mode, the WebUSB interface becomes available.
+Change to any key from Arduino's `Keyboard.h` (e.g. `KEY_F13`, `KEY_F14`), then recompile and upload.
 
-**Exiting configuration mode**: Press both buttons simultaneously 3 times within 1 second again. The LEDs will flash 2 times to confirm exit.
+## Web configuration UI
 
-### Web Configuration Page
-
-#### Setup
-
-1. **Ensure the device is in config mode** (LEDs flash 3×)
-2. **Start a local web server** from the `web/` directory:
-   ```bash
-   cd web && python3 -m http.server 8080
-   ```
-3. **Open in Chrome** (Firefox and Safari do not support WebUSB):
-   ```
-   http://localhost:8080
-   ```
-4. **Click "Connect Device"** and select your controller from the system dialog
-
-#### Features
-
-- **Key selection**: Dropdown menus organized by category (Special, Function, Navigation, Letters, Numbers)
-- **Modifier selection**: Checkboxes for Ctrl, Shift, Alt
-- **Live preview**: See the combined keycode (e.g., "Ctrl + Shift + F1") before saving
-- **Real-time sync**: Changes saved to the device are automatically written to EEPROM
-
-#### WebUSB Protocol
-
-Communication uses raw bytes over the WebUSB bulk interface:
-
-| Direction | Bytes | Meaning |
-|-----------|-------|---------|
-| Device → host (on connect or `R` command) | `'C' <key0> <mod0> <key1> <mod1>` | Current config (5 bytes) |
-| Host → device | `'K' <idx> <keycode> <modmask>` | Set button `idx` (0 or 1); saves to EEPROM; device replies `'A'` |
-| Host → device | `'R'` | Request config re-send (1 byte) |
-
-**Modifier mask bits**:
-- bit0 (0x01) = Ctrl
-- bit1 (0x02) = Shift
-- bit2 (0x04) = Alt
-
-#### HTTPS Hosting
-
-To host the configuration page over HTTPS:
-1. Change `https_only` from `0` to `1` in [MicrophoneController.ino](MicrophoneController.ino) line 36
-2. Update the WebUSB landing page URL to your HTTPS domain
-3. Recompile and upload
+A web configuration page exists in `web/` (jQuery + WebUSB) but **WebUSB is not yet implemented in the firmware**. Keys can only be changed by editing the source and re-flashing.
 
 ## Architecture
 
-All firmware logic resides in a single sketch file: [MicrophoneController.ino](MicrophoneController.ino).
+All firmware logic is in a single sketch file: `MicrophoneController.ino`.
 
-### Key Constants
+### Key constants
 
 | Constant | Default | Purpose |
 |----------|---------|---------|
-| `HOLD_MS` | `50` | Milliseconds held before a press is treated as a hold/PTT |
-| `DEBOUNCE_MS` | `10` | Debounce window in milliseconds |
-| `MIC_KEYS[2]` | `{ KEY_SCROLL_LOCK, KEY_PAUSE }` | Keyboard keys per button; loaded from EEPROM at startup |
-| `MIC_MODS[2]` | `{ 0, 0 }` | Modifier bitmask per button (bit0=Ctrl, bit1=Shift, bit2=Alt); loaded from EEPROM |
-| `JOY_BTN[2]` | `{ 7, 8 }` | 0-indexed joystick button slots (OS reports as buttons 8 and 9) |
-| `COMBO_REQUIRED` | `3` | Number of simultaneous both-button presses to toggle config mode |
-| `COMBO_WINDOW_MS` | `1000` | Time window (ms) for COMBO_REQUIRED presses to be recognized |
+| `HOLD_MS` | `50` | Milliseconds held before press is treated as PTT |
+| `DEBOUNCE_MS` | `10` | Debounce window (ms) |
+| `MIC_KEYS[2]` | `{ KEY_SCROLL_LOCK, KEY_PAUSE }` | Keyboard keys per button |
+| `JOY_BTN[2]` | `{ 7, 8 }` | 0-indexed joystick button slots |
 
-### EEPROM Layout
+### Button state machine
 
-| Address | Content | Notes |
-|---------|---------|-------|
-| `0` | Magic byte `0xAB` | Absent = EEPROM uninitialized; compile-time defaults are used |
-| `1` | `MIC_KEYS[0]` keycode | Button 1 keycode |
-| `2` | `MIC_KEYS[1]` keycode | Button 2 keycode |
-| `3` | `MIC_MODS[0]` modifier mask | Button 1 modifiers |
-| `4` | `MIC_MODS[1]` modifier mask | Button 2 modifiers |
+| Field | Purpose |
+|-------|---------|
+| `pressed` | Current debounced press state |
+| `hold` | True once hold threshold crossed |
+| `latch` | Latched active state (toggled by tap, set/cleared by hold) |
+| `pressStart` | `millis()` at press start |
+| `lastDebounce` | `millis()` at last debounce check |
 
-**Note**: `EEPROM.update()` is used (skip-if-same) to minimize write cycles.
+### Key functions
 
-### Button State Machine
+- `setSignal(idx, active)` — press/release key (keyboard) or set joystick bit (gamepad)
+- `setMode()` — reads mode pin, switches mode if changed, releases all outputs
+- `handleButton(idx)` — debounce, press/hold/release detection, latch management, LED update
+- `gamepadSetButton(index, state)` — sets/clears single bit in 32-bit button state
+- `gamepadSend()` — sends current button state as raw HID report (report ID 3)
+- `initVariant()` — registers custom 32-button HID descriptor before USB enumeration
 
-The `Button` struct tracks per-button state:
+## Serial monitor
 
-| Field | Type | Purpose |
-|-------|------|---------|
-| `pressed` | `bool` | Current debounced press state |
-| `hold` | `bool` | True once hold threshold (≥50 ms) is crossed this press |
-| `latch` | `bool` | Latched active state; toggled by tap, set/cleared by hold |
-| `pressStart` | `ulong` | `millis()` at press start; used for hold detection |
-| `lastDebounce` | `ulong` | `millis()` at last debounce check |
+The device prints status messages at **9600 baud**:
+- Mode changes: `Switched to mode: keyboard`
 
-### Key Functions
-
-- `initVariant()` — Registers the custom 32-button HID descriptor before USB enumeration (called by Arduino's `main()` after `init()`, before `USBDevice.attach()`)
-- `gamepadSetButton(index, state)` — Sets or clears a single bit in the 32-bit button state word
-- `gamepadSend()` — Sends the current button state as a raw HID report (report ID 3)
-- `loadKeysFromEEPROM()` — Reads keycodes and modifier masks from EEPROM; no-op if magic byte absent
-- `saveButtonToEEPROM(idx, key, mod)` — Writes magic byte, keycode, and modifier mask using `update()` (skip-if-same)
-- `handleWebUSB()` — Gated on `configMode`; tracks connection state, announces config on connect, dispatches `K`/`R` commands
-- `checkCombo()` — Detects simultaneous both-button presses; sets `bothPressedActive`; toggles `configMode` + flashes LEDs on 3rd press within window
-- `setSignal(idx, active)` — Presses/releases modifier keys then main key (keyboard mode) or sets joystick bit (gamepad mode)
-- `setMode()` — Reads mode pin, switches mode if changed, releases all outputs, and resets all button state on transition
-- `readMode()` — Reads `MODE_PIN` and returns `"keyboard"` (LOW) or `"gamepad"` (HIGH)
-- `handleButton(idx)` — Debounce, press/hold/release detection, latch management, HID output, and LED update for one button
-
-## Serial Monitor
-
-The device prints status messages to the serial port at **9600 baud**:
-
-- Mode changes (e.g., "Switched to mode: keyboard")
-- Config mode toggles (e.g., "Config mode: ON")
-
-To view:
-1. **Arduino IDE**: Tools → Serial Monitor
-2. **CLI**: `screen /dev/ttyACM0 9600` or similar
-
-## Remapping Keys
-
-### Via WebUSB (Recommended)
-
-1. Enter config mode (press both buttons 3× within 1 s; LEDs flash 3×)
-2. Serve the config page: `cd web && python3 -m http.server 8080`
-3. Open http://localhost:8080 in Chrome
-4. Click "Connect Device"
-5. Select your desired key and modifiers, then click "Save Button 1" or "Save Button 2"
-
-### Via Code Modification
-
-1. Edit [MicrophoneController.ino](MicrophoneController.ino), line 72:
-   ```cpp
-   uint8_t MIC_KEYS[2] = { KEY_SCROLL_LOCK, KEY_PAUSE };
-   ```
-2. Change to your desired keys (refer to Arduino's `Keyboard.h` for available constants)
-3. Recompile and upload
-
-**Available key constants** (Arduino Keyboard library):
-- Special: `KEY_SCROLL_LOCK`, `KEY_PAUSE`, `KEY_CAPS_LOCK`, `KEY_PRINT_SCREEN`
-- Function: `KEY_F1` through `KEY_F12`
-- Navigation: `KEY_INSERT`, `KEY_DELETE`, `KEY_HOME`, `KEY_END`, `KEY_PAGE_UP`, `KEY_PAGE_DOWN`, `KEY_UP_ARROW`, `KEY_DOWN_ARROW`, `KEY_LEFT_ARROW`, `KEY_RIGHT_ARROW`
-- Letters: Any letter `a`–`z` (keyboard library uses ASCII codes)
-- Numbers: Any digit `0`–`9`
-- Modifiers (usable in `MIC_MODS[2]`): `KEY_LEFT_CTRL`, `KEY_LEFT_SHIFT`, `KEY_LEFT_ALT`
+View with Arduino IDE Serial Monitor or `screen /dev/ttyACM0 9600`.
 
 ## Troubleshooting
 
-### IntelliSense Errors in VS Code / Arduino IDE
+### IntelliSense errors in VS Code / Arduino IDE
 
-The `#include` errors for `Keyboard.h` and `HID.h` are IntelliSense path issues only — the code compiles correctly.
+`#include` errors for `Keyboard.h` / `HID.h` are IntelliSense path issues only — code compiles correctly.
 
-**To resolve**:
-1. Open the command palette
-2. Run **Arduino: Board Config**
-3. Select **Arduino Leonardo**
-4. Run **Arduino: Rebuild IntelliSense Configuration**
+Fix: Command palette → **Arduino: Board Config** → select Leonardo → **Arduino: Rebuild IntelliSense Configuration**.
 
-### Device Not Detected During Upload
+### Device not detected during upload
 
-1. **Check USB connection**: Ensure a data cable (not power-only) is used
-2. **Verify board selection**: Arduino IDE → Tools → Board → Arduino Leonardo
-3. **Check bootloader**: If the device won't enter bootloader, try:
-   - Disconnect the device
-   - Reconnect while pressing the reset button on the board
-4. **Manual bootloader entry** (if needed):
-   - Reset the device by grounding the reset pin briefly
-   - Upload should begin immediately after
+1. Verify a data cable (not power-only) is used
+2. Check Tools → Board → Arduino Leonardo
+3. If needed: disconnect, hold reset, reconnect, upload immediately
 
-### WebUSB Connection Issues
+### Keys not responding
 
-- **Chrome required**: Firefox and Safari do not support WebUSB; use Chrome
-- **Config mode not active**: Ensure LEDs flash 3× when you press both buttons 3 times within 1 second
-- **Permissions denied**: On Linux, you may need to add a udev rule for the device (VID `0x1209`, PID `0x0001`)
-
-### Keys Not Responding
-
-1. **Check the mode pin (D15)**: Verify it's wired correctly
-   - LOW (to GND) = keyboard mode
-   - HIGH (floating) = gamepad mode
-2. **Test with a different application**: Some apps don't respond to certain keys
-3. **Check serial output**: Open the Serial Monitor to see if mode changes are being detected
-4. **Verify button wiring**: Use a multimeter to check that buttons properly short to GND when pressed
-
-## License
-
-See LICENSE file for details.
-
-## Contributing
-
-For development guidance, refer to [CLAUDE.md](CLAUDE.md).
+1. Check mode pin (D15) wiring
+2. Test with a different application
+3. Open Serial Monitor to verify mode detection
+4. Check button wiring with a multimeter (should short to GND when pressed)
